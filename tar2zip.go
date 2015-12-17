@@ -4,11 +4,14 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 )
+
+var verbose = flag.Bool("verbose", false, "print details about the files")
 
 func convertOneFile(hdr *tar.Header, in *tar.Reader, out *zip.Writer) {
 	zipHeader := &zip.FileHeader{
@@ -44,11 +47,14 @@ func convert(in io.Reader, out io.Writer) {
 			return
 		}
 
-		if hdr.Typeflag == tar.TypeReg ||
-			hdr.Typeflag == tar.TypeRegA ||
-			hdr.Typeflag == tar.TypeGNUSparse {
-			fmt.Printf("File: <%s> Size: %d\n", hdr.Name, hdr.Size)
+		switch hdr.Typeflag {
+		case tar.TypeReg, tar.TypeRegA, tar.TypeDir, tar.TypeGNUSparse:
+			if *verbose {
+				fmt.Printf("Converting <%s>, size %d\n", hdr.Name, hdr.Size)
+			}
 			convertOneFile(hdr, intar, outzip)
+		default:
+			fmt.Printf("Skipping entry: <%s> with Unsupported Type: %d\n", hdr.Name, hdr.Typeflag)
 		}
 	}
 }
@@ -73,8 +79,18 @@ func decompress(fn string, rdr io.Reader) io.Reader {
 	return answer
 }
 
-func zipname(fn string) string {
-	return fn + ".zip" // temporary! FIXME
+func zipname(fn string) (zfn string) {
+	switch {
+	case strings.HasSuffix(fn, ".tgz"), strings.HasSuffix(fn, ".tar"):
+		zfn = fn[:len(fn)-3] + "zip"
+	case strings.HasSuffix(fn, ".tar.gz"):
+		zfn = fn[:len(fn)-6] + "zip"
+	case strings.HasSuffix(fn, ".tar.bz2"):
+		zfn = fn[:len(fn)-7] + "zip"
+	default:
+		zfn = fn + ".zip"
+	}
+	return
 }
 
 func processFile(fn string) {
@@ -100,8 +116,8 @@ func processFile(fn string) {
 }
 
 func main() {
-	fmt.Println("Hello, soon there will be code here.")
-	for _, filename := range os.Args[1:] {
+	flag.Parse()
+	for _, filename := range flag.Args() {
 		processFile(filename)
 	}
 }
