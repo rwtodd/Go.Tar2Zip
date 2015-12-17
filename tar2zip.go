@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/tar"
+	"archive/zip"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -9,10 +10,32 @@ import (
 	"strings"
 )
 
-func convert(in io.Reader) {
-	archive := tar.NewReader(in)
+func convertOneFile(hdr *tar.Header, in *tar.Reader, out *zip.Writer) {
+	zipHeader := &zip.FileHeader{
+		Name:   hdr.Name,
+		Method: zip.Deflate,
+	}
+	zipHeader.SetModTime(hdr.ModTime)
+
+	content, err := out.CreateHeader(zipHeader)
+	if err != nil {
+		fmt.Printf("Error creating zip header: %s\n", err.Error())
+		return
+	}
+
+	_, err = io.Copy(content, in)
+	if err != nil {
+		fmt.Printf("Error copying file to zip! %s\n", err.Error())
+	}
+}
+
+func convert(in io.Reader, out io.Writer) {
+	intar := tar.NewReader(in)
+	outzip := zip.NewWriter(out)
+	defer outzip.Close()
+
 	for {
-		hdr, err := archive.Next()
+		hdr, err := intar.Next()
 		if err == io.EOF {
 			break
 		}
@@ -21,8 +44,11 @@ func convert(in io.Reader) {
 			return
 		}
 
-		if hdr.Typeflag != tar.TypeDir {
+		if hdr.Typeflag == tar.TypeReg ||
+			hdr.Typeflag == tar.TypeRegA ||
+			hdr.Typeflag == tar.TypeGNUSparse {
 			fmt.Printf("File: <%s> Size: %d\n", hdr.Name, hdr.Size)
+			convertOneFile(hdr, intar, outzip)
 		}
 	}
 }
@@ -47,6 +73,10 @@ func decompress(fn string, rdr io.Reader) io.Reader {
 	return answer
 }
 
+func zipname(fn string) string {
+	return fn + ".zip" // temporary! FIXME
+}
+
 func processFile(fn string) {
 	input, err := os.Open(fn)
 	if err != nil {
@@ -54,10 +84,17 @@ func processFile(fn string) {
 		return
 	}
 	defer input.Close()
-	fmt.Printf("Converting %s...\n", fn)
 
+	output, err := os.OpenFile(zipname(fn), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		fmt.Printf("Error opening output file! %s\n", err.Error())
+		return
+	}
+	defer output.Close()
+
+	fmt.Printf("Converting %s...\n", fn)
 	rdr := decompress(fn, input)
-	convert(rdr)
+	convert(rdr, output)
 
 	fmt.Println("Done!")
 }
