@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"archive/zip"
+	"compress/bzip2"
 	"compress/gzip"
 	"flag"
 	"fmt"
@@ -62,8 +63,8 @@ func convert(in io.Reader, out io.Writer) {
 func decompress(fn string, rdr io.Reader) io.Reader {
 	var answer io.Reader
 
-	if strings.HasSuffix(fn, ".tar.gz") ||
-		strings.HasSuffix(fn, ".tgz") {
+	switch {
+	case strings.HasSuffix(fn, ".tar.gz"), strings.HasSuffix(fn, ".tgz"):
 		gzReader, err := gzip.NewReader(rdr)
 		if err == nil {
 			answer = gzReader
@@ -72,7 +73,10 @@ func decompress(fn string, rdr io.Reader) io.Reader {
 			answer = rdr
 		}
 
-	} else {
+	case strings.HasSuffix(fn, ".tar.bz2"):
+		answer = bzip2.NewReader(rdr)
+
+	default:
 		answer = rdr
 	}
 
