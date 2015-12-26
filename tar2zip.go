@@ -9,17 +9,27 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 )
+
+const (
+	gzComp = iota
+	bz2Comp
+	noComp
+)
+
+type compressionType int
 
 var verbose = flag.Bool("verbose", false, "print details about the files")
 
-func convertOneFile(hdr *tar.Header, in *tar.Reader, out *zip.Writer) {
+func convertOneFile(fn string, ft time.Time, in io.Reader, out *zip.Writer) {
 	zipHeader := &zip.FileHeader{
-		Name:   hdr.Name,
+		Name:   fn,
 		Method: zip.Deflate,
 	}
-	zipHeader.SetModTime(hdr.ModTime)
+	zipHeader.SetModTime(ft)
 
 	content, err := out.CreateHeader(zipHeader)
 	if err != nil {
@@ -33,7 +43,18 @@ func convertOneFile(hdr *tar.Header, in *tar.Reader, out *zip.Writer) {
 	}
 }
 
-func convert(in io.Reader, out io.Writer) {
+func zipSingle(fn string, in io.Reader, out io.Writer) {
+	outzip := zip.NewWriter(out)
+	defer outzip.Close()
+
+	if *verbose {
+		fmt.Printf("Converting single non-tar file %s.\n", fn)
+	}
+
+	convertOneFile(fn, time.Now(), in, outzip)
+}
+
+func convertTar(in io.Reader, out io.Writer) {
 	intar := tar.NewReader(in)
 	outzip := zip.NewWriter(out)
 	defer outzip.Close()
@@ -45,7 +66,7 @@ func convert(in io.Reader, out io.Writer) {
 		}
 		if err != nil {
 			fmt.Printf("Error reading archive: %s\n", err.Error())
-			return
+			break
 		}
 
 		switch hdr.Typeflag {
@@ -53,27 +74,27 @@ func convert(in io.Reader, out io.Writer) {
 			if *verbose {
 				fmt.Printf("Converting <%s>, size %d\n", hdr.Name, hdr.Size)
 			}
-			convertOneFile(hdr, intar, outzip)
+			convertOneFile(hdr.Name, hdr.ModTime, intar, outzip)
 		default:
 			fmt.Printf("Skipping entry: <%s> with Unsupported Type: %d\n", hdr.Name, hdr.Typeflag)
 		}
 	}
 }
 
-func decompress(fn string, rdr io.Reader) io.Reader {
+func decompress(comp compressionType, rdr io.Reader) io.Reader {
 	var answer io.Reader
 
-	switch {
-	case strings.HasSuffix(fn, ".tar.gz"), strings.HasSuffix(fn, ".tgz"):
+	switch comp {
+	case gzComp:
 		gzReader, err := gzip.NewReader(rdr)
 		if err == nil {
 			answer = gzReader
 		} else {
-			fmt.Printf("%s can't be decompressed: %s\n", fn, err.Error())
+			fmt.Printf("File can't be decompressed: %s\n", err.Error())
 			answer = rdr
 		}
 
-	case strings.HasSuffix(fn, ".tar.bz2"):
+	case bz2Comp:
 		answer = bzip2.NewReader(rdr)
 
 	default:
@@ -83,17 +104,37 @@ func decompress(fn string, rdr io.Reader) io.Reader {
 	return answer
 }
 
-func zipname(fn string) (zfn string) {
+func analyzeInput(fn string) (isTar bool, comp compressionType, basefn string) {
+	isTar = true
+	comp = noComp
+	var toStrip = 0
+
 	switch {
-	case strings.HasSuffix(fn, ".tgz"), strings.HasSuffix(fn, ".tar"):
-		zfn = fn[:len(fn)-3] + "zip"
+	case strings.HasSuffix(fn, ".tar"):
+		toStrip = 4
+	case strings.HasSuffix(fn, ".tgz"):
+		comp = gzComp
+		toStrip = 4
 	case strings.HasSuffix(fn, ".tar.gz"):
-		zfn = fn[:len(fn)-6] + "zip"
+		comp = gzComp
+		toStrip = 7
 	case strings.HasSuffix(fn, ".tar.bz2"):
-		zfn = fn[:len(fn)-7] + "zip"
+		comp = bz2Comp
+		toStrip = 8
+	case strings.HasSuffix(fn, ".bz2"):
+		toStrip = 4
+		comp = bz2Comp
+		isTar = false
+	case strings.HasSuffix(fn, ".gz"):
+		toStrip = 3
+		comp = gzComp
+		isTar = false
 	default:
-		zfn = fn + ".zip"
+		isTar = false
 	}
+
+	basefn = fn[:len(fn)-toStrip]
+
 	return
 }
 
@@ -105,7 +146,8 @@ func processFile(fn string) {
 	}
 	defer input.Close()
 
-	output, err := os.OpenFile(zipname(fn), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
+	isTar, comp, basename := analyzeInput(fn)
+	output, err := os.OpenFile(basename+".zip", os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
 		fmt.Printf("Error opening output file! %s\n", err.Error())
 		return
@@ -113,8 +155,12 @@ func processFile(fn string) {
 	defer output.Close()
 
 	fmt.Printf("Converting %s...\n", fn)
-	rdr := decompress(fn, input)
-	convert(rdr, output)
+	rdr := decompress(comp, input)
+	if isTar {
+		convertTar(rdr, output)
+	} else {
+		zipSingle(filepath.Base(basename), rdr, output)
+	}
 
 	fmt.Println("Done!")
 }
