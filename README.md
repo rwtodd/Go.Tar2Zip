@@ -6,7 +6,7 @@ over tar.gz archives.  It's just nicer, since ZIP files
 are integrated into the Explorer by default, without needing
 to install any programs like 7-zip.
 
-Since golang comes with packages for tar and zip, it was 
+Since Go comes with packages for tar and zip, it was 
 very easy to throw together this converter. Now, when I
 get a typical tar archive, I can just convert it and 
 go about my business.
