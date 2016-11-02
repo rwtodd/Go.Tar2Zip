@@ -14,13 +14,13 @@ import (
 	"time"
 )
 
+type compressionType int
+
 const (
-	gzComp = iota
+	gzComp compressionType = iota
 	bz2Comp
 	noComp
 )
-
-type compressionType int
 
 var verbose = flag.Bool("verbose", false, "print details about the files")
 
