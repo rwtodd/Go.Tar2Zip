@@ -15,7 +15,7 @@ go about my business.
 
 You should be able to install this program by saying:
 
-    go get github.com/rwtodd/tar2zip
+    go get github.com/rwtodd/Go.Tar2Zip/cmd/tar2zip
 
 ## Usage:
 
